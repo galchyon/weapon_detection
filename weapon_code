@@ -1,0 +1,256 @@
+from IPython.display import clear_output 
+import cv2
+from google.colab.patches import cv2_imshow
+import random
+from PIL import Image, ImageDraw
+import numpy as np
+from numpy import int64
+import matplotlib.pyplot as plt
+import os
+import glob
+from imageio import imread
+import cv2
+from google.colab.patches import cv2_imshow
+import imutils
+import json
+import tensorflow as tf
+import tensorflow_datasets as tfds
+from tensorflow.keras.applications import VGG16, VGG19
+from tensorflow.keras.layers import Flatten
+from tensorflow.keras.layers import Dense
+from tensorflow.keras.layers import Input
+from tensorflow.keras.layers import RandomFlip
+from tensorflow.keras.layers import Dropout
+from tensorflow.keras.models import Model
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.preprocessing.image import img_to_array
+from tensorflow.keras.preprocessing.image import load_img
+from sklearn.model_selection import train_test_split
+from tensorflow.keras import backend as K
+import torch
+from IPython.display import Image
+import os 
+import random
+import shutil
+from sklearn.model_selection import train_test_split
+import xml.etree.ElementTree as ET
+from xml.dom import minidom
+from tqdm import tqdm
+from PIL import Image, ImageDraw
+import numpy as np
+import matplotlib.pyplot as plt
+import skimage
+
+def move_files_to_folder(list_of_files, destination_folder):
+    for f in list_of_files:
+        try:
+            shutil.copy(f, destination_folder)
+        except:
+            print(f)
+            assert False
+            
+#замена канала
+def augmentation(img):
+    b,g,r=cv2.split(img)
+    img_ch=cv2.merge((r,b,g))
+    return(img_ch)
+    
+#изменение яркости изображения
+def brightness(img, low, high):
+    value = random.uniform(low, high)
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    hsv = np.array(hsv, dtype = np.float64)
+    hsv[:,:,1] = hsv[:,:,1]*value
+    hsv[:,:,1][hsv[:,:,1]>255]  = 255
+    hsv[:,:,2] = hsv[:,:,2]*value 
+    hsv[:,:,2][hsv[:,:,2]>255]  = 255
+    hsv = np.array(hsv, dtype = np.uint8)
+    img = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+    return img
+    
+#код для аугментации файлов в директории указанной выборки
+def augmentFilesInDir(pathToDir):
+
+    for fl in sorted(os.listdir(pathToDir)):
+        if(".jpg" in fl):
+            # Считываем изображение
+            img = cv2.imread(pathToDir+fl)
+            # Изменяем изобраение
+            img1 = brightness(img, 0.5, 1.5)
+            img2 = augmentation(img)
+            # Раздлеяем исходное название чтобы избавиться от расширения ".jpg"
+            tmp1 = fl.split('.')
+            tmp2 = fl.split('.')
+            # Инициализируем новое название с желанным расширением изображения
+            newFl = tmp1[0]+'_1.jpg'
+            newFl2 = tmp2[0]+'_2.jpg'
+            # Сохраняем изменённое изображение в отдельной директории (в задании директорию менять не обязательно)
+            cv2.imwrite(pathToDir+newFl, img1)
+            cv2.imwrite(pathToDir+newFl2, img2)
+        
+        else:
+            tmp = fl.split('.')
+            #tmp2 = fl.split('.')
+            newFl = tmp[0]+'_1.txt'
+            newFl2 = tmp[0]+'_2.txt'
+            shutil.copy(pathToDir+fl, pathToDir+newFl)
+            shutil.copy(pathToDir+fl, pathToDir+newFl2)
+            
+# Функция для демонстрации разметки
+def plot_bounding_box(image, annotation_list):
+    annotations = np.array(annotation_list)
+    
+    # Получаем размер изображения
+    w, h = image.size
+    
+    # Выводим исходное изображение
+    plotted_image = ImageDraw.Draw(image)
+
+    # Конвертируем координаты для показа
+    transformed_annotations = np.copy(annotations)
+    transformed_annotations[:,[1,3]] = annotations[:,[1,3]] * w
+    transformed_annotations[:,[2,4]] = annotations[:,[2,4]] * h 
+    
+    transformed_annotations[:,1] = transformed_annotations[:,1] - (transformed_annotations[:,3] / 2)
+    transformed_annotations[:,2] = transformed_annotations[:,2] - (transformed_annotations[:,4] / 2)
+    transformed_annotations[:,3] = transformed_annotations[:,1] + transformed_annotations[:,3]
+    transformed_annotations[:,4] = transformed_annotations[:,2] + transformed_annotations[:,4]
+    
+    # Вывод разметки и классов объектов
+    for ann in transformed_annotations:
+        obj_cls, x0, y0, x1, y1 = ann
+        plotted_image.rectangle(((x0,y0), (x1,y1)))
+        
+        plotted_image.text((x0, y0 - 10), class_id_to_name_mapping[(int(obj_cls))])
+    
+    plt.figure(figsize = (30,10))
+    plt.imshow(np.array(image), interpolation='nearest')
+    plt.show()
+    
+# Скачивание репозитория с YOLOv5 и необходимых библиотек для работы модели
+!git clone https://github.com/ultralytics/yolov5
+!pip install -r ./yolov5/requirements.txt
+clear_output()
+
+!touch ./yolov5/data/custom.yaml
+my_file = open('/kaggle/working/yolov5/data/custom.yaml','w+')
+my_file.write('train: ../weapon_data/images/train/ \nval:  ../weapon_data/images/val/ \ntest: ../weapon_data/images/test/ \n# number of classes \nnc: 1 \n# class names \nnames: ["weapon"]')
+my_file.readlines()
+
+!mkdir ./yolov5/weapon_data
+!mkdir ./yolov5/weapon_data/images ./yolov5/weapon_data/labels
+# Создаём папки для хранения выборок
+!mkdir ./yolov5/weapon_data/images/train ./yolov5/weapon_data/images/val ./yolov5/weapon_data/images/test ./yolov5/weapon_data/labels/train ./yolov5/weapon_data/labels/val ./yolov5/weapon_data/labels/test
+
+originTrainImgs = "../input/weapon-data/weapon_data/images/train/"
+originTestImgs = "../input/weapon-data/weapon_data/images/test/"
+originValImgs = "../input/weapon-data/weapon_data/images/val/"
+
+originTrainLabls = "../input/weapon-data/weapon_data/labels/train/"
+originTestLabls = "../input/weapon-data/weapon_data/labels/test/"
+originValLabls = "../input/weapon-data/weapon_data/labels/val/"
+
+# Создаём пустые списки для хранения путей к изображениям
+images = []
+train_images = []
+test_images = []
+val_images = []
+
+# Копируем изображения из "внутреннего" датасета в ранее созданные папки выборок
+for fl in sorted(os.listdir(originTrainImgs)):
+    images.append(originTrainImgs+fl)
+    train_images.append(originTrainImgs+fl)
+move_files_to_folder(train_images, "./yolov5/weapon_data/images/train/")    
+for fl in sorted(os.listdir(originTestImgs)):
+    images.append(originTestImgs+fl)
+    test_images.append(originTestImgs+fl)
+move_files_to_folder(test_images, "./yolov5/weapon_data/images/test/")  
+for fl in sorted(os.listdir(originValImgs)):
+    images.append(originValImgs+fl)
+    val_images.append(originValImgs+fl)
+move_files_to_folder(val_images, "./yolov5/weapon_data/images/val/")
+
+# Повторяем процедуру для файлов разметки
+annotations = []
+train_annotations = []
+test_annotations = []
+val_annotations = []
+
+for fl in sorted(os.listdir(originTrainLabls)):
+    annotations.append(originTrainLabls+fl)
+    train_annotations.append(originTrainLabls+fl)
+move_files_to_folder(train_annotations, "./yolov5/weapon_data/labels/train/")    
+for fl in sorted(os.listdir(originTestLabls)):
+    annotations.append(originTestLabls+fl)
+    test_annotations.append(originTestLabls+fl)
+move_files_to_folder(test_annotations, "./yolov5/weapon_data/labels/test/")  
+for fl in sorted(os.listdir(originValLabls)):
+    annotations.append(originValLabls+fl)
+    val_annotations.append(originValLabls+fl)
+move_files_to_folder(val_annotations, "./yolov5/weapon_data/labels/val/")  
+
+#проверка
+!ls ./yolov5/weapon_data/images/test/
+print('--------------')
+!ls ./yolov5/weapon_data/labels/test/
+
+imgTrain = "./yolov5/weapon_data/images/train/"
+imgTest = "./yolov5/weapon_data/images/test/"
+imgVal = "./yolov5/weapon_data/images/val/"
+labelsTrain = "./yolov5/weapon_data/labels/train/"
+labelsTest = "./yolov5/weapon_data/labels/test/"
+labelsVal = "./yolov5/weapon_data/labels/val/"
+
+augmentFilesInDir(labelsTrain)
+augmentFilesInDir(imgTrain)
+
+augmentFilesInDir(labelsTest)
+augmentFilesInDir(imgTest)
+
+augmentFilesInDir(labelsVal)
+augmentFilesInDir(imgVal)
+
+#проверка
+!ls ./yolov5/weapon_data/images/test/
+print('--------------')
+!ls ./yolov5/weapon_data/labels/test/
+
+# Определение id классов объектов
+class_name_to_id_mapping = {"weapon": 0,}
+
+# Установка сида рандомной генерации
+random.seed(0)
+
+# Определяем словарь с id классов
+class_id_to_name_mapping = dict(zip(class_name_to_id_mapping.values(), class_name_to_id_mapping.keys()))
+
+# Выбираем случайный файл разметки
+annotation_file = random.choice(annotations)
+with open(annotation_file, "r") as file:
+    annotation_list = file.read().split("\n")[:-1]
+    annotation_list = [x.split(" ") for x in annotation_list]
+    annotation_list = [[float(y) for y in x ] for x in annotation_list]
+
+# Получаем соответствующий файл с разметкой
+image_file = annotation_file.replace("labels", "images").replace("txt", "jpg")
+assert os.path.exists(image_file)
+
+# Загрузка изображения
+image = Image.open(image_file)
+
+# Показ разметки
+plot_bounding_box(image, annotation_list)
+
+%cd ./yolov5
+!python train.py --img 640 --cfg yolov5s.yaml --hyp hyp.scratch-med.yaml --batch 25 --epochs 100 --data ./data/custom.yaml --weights yolov5s.pt --workers 24 --name yolo_weapon_det
+!python detect.py --source ./weapon_data/images/test/ --weights runs/train/yolo_weapon_det/weights/best.pt --conf 0.25 --name yolo_weapon_det
+
+detections_dir = "./runs/detect/yolo_weapon_det/"
+detection_images = [os.path.join(detections_dir, x) for x in os.listdir(detections_dir)]
+for fl in os.listdir(detections_dir):
+  img = cv2.imread(detections_dir+fl)
+  img = imutils.resize(img, width=600)
+  cv2_imshow(img)
+
+print('test results:')
+!python val.py --weights ./runs/train/yolo_weapon_det/weights/best.pt --data custom.yaml --task test --name yolo_weapon_det_test
